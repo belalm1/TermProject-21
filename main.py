@@ -2,6 +2,27 @@
 # Imports
 import pygame, random
 
+# NOTES
+
+# ------ BOX ------
+# Check if within X bounds of the BOX. If so, activate "second floor". Second floor is the main primary floor, if below
+# second floor, use typical floor as the floor.
+
+# ------ WEAPONS ------
+# NO PHYSICAL WEAPONS!! YAY!!
+# The cursor functions as a weapon, click on enemies within range to kill them (they turn white to show hurt)
+# There is always a "pointer" where the cursor is, it is marked with a red "do not" symbol if out of range
+# If within range, it should be a sword or a pointer
+# When clicking (and click is within range of character), cycle through a dictionary of all enemies, if
+# the cursor pointer is within the hitbox of any enemy, apply damage to them
+
+# ------ ENEMY COLLISION ------
+# Every frame, the player checks the enemy dictionary to see if within the hitbox of any, [might wanna implement a
+# checkInEnemyHitbox() function at this point], if so, deduct a health point from the player, and set them to IMMUNE for
+# X amount of time. The player should not check for enemy collision if immune.
+
+
+
 class gameValues(object):
     def __init__(self):
         # Dimensions
@@ -11,13 +32,14 @@ class gameValues(object):
 
         # Floor
         self.floor = int(self.height * (8/10))
+        self.chestFloor = self.floor + 2
         self.bounds = [0, 0, self.width, self.floor]
         self.spawnPoint = [self.width//2, self.floor]
 
         # Character values
         self.maxSpeed = 1.5
         self.jumpStrength = 5
-        self.charFrames = 32
+        self.charFrames = 64
         self.gravity = -0.1
         self.minYVelocity = -3
 
