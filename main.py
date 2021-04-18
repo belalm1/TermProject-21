@@ -21,8 +21,6 @@ import pygame, random
 # checkInEnemyHitbox() function at this point], if so, deduct a health point from the player, and set them to IMMUNE for
 # X amount of time. The player should not check for enemy collision if immune.
 
-
-
 class gameValues(object):
     def __init__(self):
         # Dimensions
@@ -40,21 +38,87 @@ class gameValues(object):
         self.maxSpeed = 1.5
         self.jumpStrength = 5
         self.charFrames = 64
-        self.gravity = -0.1
+        self.gravity = -0.11
         self.minYVelocity = -3
+        self.coinMultiplier = 1
+
+        # Player-game Values
+        self.health = 100
+        self.coins = 0
 
         # Changeable values
         self.map = 0
         self.mapVals = {  # Set this later
             0: [None, None, None],
-            1: [None, None, None]
-        }
+            1: [None, None, None]}
+
+    # Add coins to the player's storage
+    def addCoins(self):
+        # Add multipliers in the future
+        self.coins += self.coinMultiplier
+
+
+# Box class
+class boxObject(pygame.sprite.Sprite):
+    def __init__(self, vars):
+
+        # Variables
+        self.size = 70
+        self.rad = 35
+        self.xCenter = vars.width//2
+        self.yBottom = vars.floor
+        self.yTop = vars.floor - self.size
+        self.isHit = False
+        self.hurtingFrames = 0
+        self.maxHurt = 10 # Amount of frames to look "hurt"
+
+        # Images
+        self.idle = pygame.image.load("resources/grassBlock.png").convert_alpha()
+        self.hit = pygame.image.load("resources/grassBlock_hit.png").convert_alpha()
+
+        # Sets starting image and rect
+        self.image = self.idle
+        self.rect = self.image.get_rect()
+
+    # Checks if player within x bounds of box
+    def withinBounds(self, playerX):
+        xStart = self.xCenter - self.rad
+        xEnd = self.xCenter + self.rad
+        if xStart <= playerX <= xEnd:
+            return True
+        return False
+
+    # Player landed on box, display box flash (aka hurt)
+    def getHit(self):
+        self.isHit = True
+
+    # Render box
+    def render(self, screen, vars):
+        # Check if box has been landed on
+        if self.isHit:
+            self.image = self.hit
+
+            # Increment hurting frames, reset if necessary
+            self.hurtingFrames += 1
+            if self.hurtingFrames == self.maxHurt:
+                self.isHit = False
+                self.hurtingFrames = 0
+            elif self.hurtingFrames == 1:
+                # Add coins!!!
+                vars.addCoins()
+
+            # Add hurt sound?
+        else:
+            self.image = self.idle
+        self.rect.midbottom = (self.xCenter, self.yBottom)
+        screen.blit(self.image, self.rect)
 
 # Player character class, descended from the pygame Sprite class
 class player(pygame.sprite.Sprite):
     def __init__(self, vars):
         super(player, self).__init__()
-        self.health = 100
+
+        # Variables
         self.floor = vars.floor
         self.xPos = vars.spawnPoint[0]
         self.yPos = vars.spawnPoint[1]
@@ -80,18 +144,29 @@ class player(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.flipped = False
 
+    # Returns sprite rect
     def getRect(self):
             return self.rect
 
+    # Sets player's X velocity
     def setVelocity(self, value):
         self.velocity = value
 
-    def update(self, screen):
+    # Updates the player position and logic
+    def update(self, screen, box):
         # Variables
         newX = self.xPos + self.velocity
         self.halfWidth = self.rect.width // 2
         startX = newX - self.halfWidth
         endX = newX + self.halfWidth
+
+        # Box-Player Logic
+        if self.yPos <= (box.yTop + 5) and box.withinBounds(self.xPos):
+            currentFloor = box.yTop
+            isSecondFloor = True
+        else:
+            currentFloor = self.floor
+            isSecondFloor = False
 
         # Check if player is within screen bounds
         if self.bounds[0] < startX and endX < self.bounds[2]:
@@ -104,10 +179,12 @@ class player(pygame.sprite.Sprite):
             self.flipped = False
 
         # Apply gravity and grounding to velocity
-        if self.yPos < self.floor and self.yVelocity > self.minYVelocity:
+        if self.yPos < currentFloor and self.yVelocity > self.minYVelocity:
             self.yVelocity += self.gravity
-        elif self.yPos >= self.floor and self.yVelocity < 0:
-            self.yPos = self.floor
+        elif self.yPos > currentFloor and self.yVelocity < 0:
+            if isSecondFloor:
+                box.getHit()
+            self.yPos = currentFloor
             self.yVelocity = 0
 
         # Apply velocity
@@ -119,6 +196,7 @@ class player(pygame.sprite.Sprite):
         if self.frame >= self.charFrames:
             self.frame = 0
 
+    # Renders the player
     def render(self, screen):
         # Set walking image frame (if walking)
         if abs(self.velocity) > 0:
@@ -152,6 +230,7 @@ def game():
 
     # Main Assets
     plr = player(vals)
+    box = boxObject(vals)
 
     # Background
     background = pygame.image.load("resources/background.png").convert_alpha()
@@ -172,7 +251,8 @@ def game():
         # Managing fps
         clock.tick(144)
         fps = clock.get_fps()
-        print(int(fps // 1))
+        #print(int(fps // 1))
+        #print(vals.coins)
 
         # Check for quit
         for event in pygame.event.get():
@@ -201,7 +281,8 @@ def game():
         gameScreen.fill(black)
         gameScreen.blit(background, backgroundRect)
         gameScreen.blit(ground, groundRect)
-        plr.update(gameScreen)
+        box.render(gameScreen, vals)
+        plr.update(gameScreen, box)
         pygame.display.flip()
     pygame.quit()
 
