@@ -1,6 +1,6 @@
 
 # Imports
-import pygame, random
+import pygame, random, math
 
 # NOTES
 
@@ -28,6 +28,15 @@ class gameValues(object):
         self.width = wSize[0]
         self.height = wSize[1]
 
+        # Background Visibility
+        self.blackScreen = [0, 0, 0, 0]
+        self.dimStarted = False
+        self.dimming = False
+        self.dimPhase = -1
+        self.dimTimer = 0
+        self.dimSpeed = 1
+        self.dimMap = -1
+
         # Floor
         self.floor = int(self.height * (8/10))
         self.chestFloor = self.floor + 2
@@ -41,11 +50,25 @@ class gameValues(object):
         self.gravity = -0.11
         self.minYVelocity = -3
         self.coinMultiplier = 50
+        self.margin = 50
+        self.maxHurt = 350
 
         # Player-game Values
         self.maxHealth = 3
-        self.healthPoints = 3.5
+        self.healthPoints = self.maxHealth
         self.coins = 0
+        self.clickDistance = 250
+        self.clickInterval = 10
+
+        # Enemy values
+        self.timerInterval = 90
+        self.maxMove = 50
+        self.enemyTimer = 0
+        self.spawnTimer = (400, 800)
+        self.maxEnemies = 5
+        self.listOfEnemies = []
+        self.defeatedEnemies = 0
+        self.enemiesToDefeat = 5
 
         # Health Point Display Location
         self.healthPos = [75, self.height - 75]
@@ -59,10 +82,10 @@ class gameValues(object):
 
         # Changeable values
         self.map = 0
-        self.mapVals = [  # Set this later
-            # Number : [Map_Name, Background_Image]
-            ["Home", "resources/background.png"],
-            ["Arena", "resources/background.png"]]
+        self.mapVals = [
+            # Number : [Map_Name, BackgroundImage, GroundImage]
+            ["Home", "resources/background.png", "resources/ground.png"],
+            ["Arena", "resources/background2.png", "resources/ground2.png"]]
         self.swordFiles = [
             "resources/sword1.png",
             "resources/sword2.png",
@@ -83,6 +106,16 @@ class gameValues(object):
         if upgrade[0] < upgrade[1] and self.coins >= upgrade[4][upgrade[0]]:
             self.coins -= upgrade[4][upgrade[0]]
             self.upgrades[id][0] += 1
+
+    def changeScene(self, newMap, changeType):
+        self.dimStarted = True
+        self.dimPhase = 0
+        self.dimMap = newMap
+        if changeType == "loss":
+            self.dimType = 0
+        elif changeType == "win":
+            self.dimType = 1
+
 
 # Box class
 class boxObject(pygame.sprite.Sprite):
@@ -139,6 +172,121 @@ class boxObject(pygame.sprite.Sprite):
         self.rect.midbottom = (self.xCenter, self.yBottom)
         screen.blit(self.image, self.rect)
 
+# Enemy character class
+class enemyObject(pygame.sprite.Sprite):
+    def __init__(self, vars, player):
+
+        validSpawnX = False
+        while not validSpawnX:
+            self.xPos = random.randint(vars.margin, vars.width - vars.margin)
+            if abs(player.xPos - self.xPos) > 150:
+                validSpawnX = True
+        self.yPos = vars.floor
+        self.iIdle = "resources/slime.png"
+        self.iPrep = "resources/slimePrep.png"
+        self.iMove = "resources/slimeMove.png"
+        self.iHit = "resources/slimeHit.png"
+        self.timer = 0
+        self.startX = self.xPos
+        self.direction = 1
+        self.hp = 3
+
+        # States: "idle", "prep", "move", "hit"
+        self.state = "idle"
+        self.lastState = self.state
+
+        self.image = pygame.image.load(self.iIdle).convert_alpha()
+        self.rect = self.image.get_rect()
+        self.rect.midbottom = (self.xPos, self.yPos)
+
+    def click(self, mousePos, player, power, vals):
+        mouseX = mousePos[0]
+        mouseY = mousePos[1]
+
+        xStart = self.rect.left
+        xEnd = self.rect.right
+        yStart = self.rect.top
+        yEnd = self.rect.bottom
+
+        plrX = player.xPos
+        plrY = player.yPos
+
+        a = (plrX - mouseX) ** 2
+        b = (plrY - mouseY) ** 2
+        c = abs(math.sqrt(a + b))
+
+        if c < vals.clickDistance:
+            if xStart <= mouseX <= xEnd and yStart <= mouseY <= yEnd:
+                self.hp -= power
+                if self.hp == 0:
+                    return True
+        return False
+
+
+    def hit(self):
+        self.changeImage(self.iHit)
+        self.state = "hit"
+        self.timer = 0
+
+    def changeImage(self, newImage):
+        newImageTemp = pygame.image.load(newImage).convert_alpha()
+        if self.direction == 1:
+            self.image = pygame.transform.flip(newImageTemp, True, False)
+        else:
+            self.image = newImageTemp
+        self.rect = self.image.get_rect()
+        self.rect.midbottom = (self.xPos, self.yPos)
+
+    def update(self, screen, player, vars):
+        # Check for player collision
+        if self.rect.colliderect(player.rect) and player.hurting == 0 and vars.healthPoints > 0:
+            # Apply damage
+            self.changeImage(self.iIdle)
+            player.hurting = vars.maxHurt
+            vars.healthPoints -= 0.5
+            print(vars.healthPoints)
+            self.state = "idle"
+            self.timer = 0
+
+        # Movement and animations
+        self.lastState = self.state
+        if self.lastState == "idle":
+            #print("count idle")
+            if self.timer > vars.timerInterval // 3:
+                #print("Switch to prep")
+                self.changeImage(self.iPrep)
+                self.state = "prep"
+                self.timer = 0
+        if self.lastState == "prep":
+            #print("count prep")
+            if self.timer > vars.timerInterval:
+                #print("Switch to move")
+                self.changeImage(self.iMove)
+                self.state = "move"
+                self.startX = self.xPos
+                self.timer = 0
+        if self.lastState == "move":
+            if self.timer == 0:
+                self.changeImage()
+            self.direction = 1
+            startX = self.startX
+            if player.xPos < self.startX:
+                self.direction = -1
+            endX = startX + (self.direction * vars.maxMove)
+            currentPosition = self.xPos + ((endX - startX) / vars.maxMove)
+            self.xPos = currentPosition
+            if abs(currentPosition - endX) <= 2:
+                #print("Switch to idle")
+                self.changeImage(self.iIdle)
+                self.state = "idle"
+                self.timer = 0
+        self.timer += 1
+        self.render(screen)
+
+    def render(self, screen):
+        self.rect.midbottom = (self.xPos, self.yPos)
+        screen.blit(self.image, self.rect)
+
 # Player character class, descended from the pygame Sprite class
 class player(pygame.sprite.Sprite):
     def __init__(self, vars):
@@ -157,6 +305,7 @@ class player(pygame.sprite.Sprite):
         self.frame = 0
         self.charFrames = vars.charFrames
         self.paused = False
+        self.hurting = 0
 
         # Image Assets
         self.iIdle = pygame.image.load("resources/idle.png").convert_alpha()
@@ -179,6 +328,14 @@ class player(pygame.sprite.Sprite):
     def setVelocity(self, value):
         self.velocity = value
 
+    def resetPosition(self, vars):
+        self.xPos = vars.spawnPoint[0]
+        self.yPos = vars.spawnPoint[1]
+        self.image = self.iIdle
+        self.flipped = False
+        self.velocity = 0
+        self.yVelocity = 0
+
     # Updates the player position and logic
     def update(self, screen, box, vars):
         if not self.paused:
@@ -187,6 +344,11 @@ class player(pygame.sprite.Sprite):
             self.halfWidth = self.rect.width // 2
             startX = newX - self.halfWidth
             endX = newX + self.halfWidth
+
+
+            # Box-Enemy Logic
+            if self.hurting > 0:
+                self.hurting -= 1
 
             # Box-Player Logic
             if self.yPos <= (box.yTop + 5) and box.withinBounds(self.xPos) and vars.map == 0:
@@ -359,31 +521,12 @@ def game():
 
     # Cursor
     cursorFile = "resources/cursor.png"
-    if vals.map > 0:
-        swordLevel = vals.upgrades["sword"][0]
+    if vals.map == 1:
+        swordLevel = vals.upgrades[0][0]
         cursorFile = vals.swordFiles[swordLevel]
     cursor = pygame.image.load(cursorFile).convert_alpha()
     cursorRect = cursor.get_rect()
-
-    # Health
-    healthPointsTemp = vals.healthPoints
-    healthPointsList = []
-    for i in range(vals.maxHealth):
-        positionX = vals.healthPos[0] + (i * vals.healthSpacing)
-        positionY = vals.healthPos[1]
-
-        healthImageName = "resources/noHealth.png"
-        if healthPointsTemp >= 1:
-            healthImageName = "resources/fullHealth.png"
-        elif 0 < healthPointsTemp < 1:
-            healthImageName = "resources/halfHealth.png"
-
-        healthImage = pygame.image.load(healthImageName).convert_alpha()
-        healthImage = pygame.transform.scale(healthImage, (64, 64))
-        healthImageRect = healthImage.get_rect()
-        healthImageRect.center = (positionX, positionY)
-        healthPointsList += [[healthImage, healthImageRect]]
-        healthPointsTemp -= 1
+    clickTimer = 0
 
     # Background
     bgFile = vals.mapVals[vals.map][1]
@@ -392,7 +535,8 @@ def game():
     backgroundRect = background.get_rect()
 
     # Ground
-    ground = pygame.image.load("resources/ground.png").convert_alpha()
+    gFile = vals.mapVals[vals.map][2]
+    ground = pygame.image.load(gFile).convert_alpha()
     ground = pygame.transform.scale(ground, [vals.width, vals.height])
     groundRect = ground.get_rect()
 
@@ -407,7 +551,8 @@ def game():
         fps = clock.get_fps()
 
         # Change cursor location
-        cursorRect.center = pygame.mouse.get_pos()
+        cursorRect.topleft = pygame.mouse.get_pos()
+        clickTimer += 1
 
         # Check for quit
         for event in pygame.event.get():
@@ -427,6 +572,13 @@ def game():
                         vals.buyUpgrade(upgradeMenu.selectedUpgrade)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 upgradeMenu.getClicked(pygame.mouse.get_pos())
+                if vals.map == 1 and clickTimer >= vals.clickInterval:
+                    clickTimer = 0
+                    for enemy in vals.listOfEnemies:
+                        isDead = enemy.click(pygame.mouse.get_pos(), plr, vals.upgrades[0][0] + 1, vals)
+                        if isDead:
+                            vals.listOfEnemies.remove(enemy)
+                            vals.defeatedEnemies += 1
 
         # Checking keys pressed
         pressed = pygame.key.get_pressed()
@@ -447,6 +599,27 @@ def game():
             if not pressed[pygame.K_LEFT] and not pressed[pygame.K_a]:
                 plr.setVelocity(0)
 
+        # Managing scene switch to arena
+        if vals.map == 0 and plr.xPos >= (vals.width - 52):
+            print("Scene Switch")
+            plr.resetPosition(vals)
+            vals.map = 1
+
+            bgFile = vals.mapVals[vals.map][1]
+            background = pygame.image.load(bgFile).convert_alpha()
+            background = pygame.transform.scale(background, [vals.width, vals.height])
+            backgroundRect = background.get_rect()
+
+            gFile = vals.mapVals[vals.map][2]
+            ground = pygame.image.load(gFile).convert_alpha()
+            ground = pygame.transform.scale(ground, [vals.width, vals.height])
+            groundRect = ground.get_rect()
+
+            swordLevel = vals.upgrades[0][0]
+            cursorFile = vals.swordFiles[swordLevel]
+            cursor = pygame.image.load(cursorFile).convert_alpha()
+            cursorRect = cursor.get_rect()
+
         # Rendering Background Assets
         gameScreen.fill(black)
         gameScreen.blit(background, backgroundRect)
@@ -459,27 +632,142 @@ def game():
         # Render Player
         plr.update(gameScreen, box, vals)
 
+        # Creating enemies
+        if vals.map == 1:
+            enemyMsg = "Enemies Defeated: " + str(vals.defeatedEnemies) + "/" + str(vals.enemiesToDefeat)
+            enemyFont = pygame.font.Font('resources/KenneyFutureNarrow.ttf', 40)
+            enemyText = enemyFont.render(enemyMsg, False, (255, 185, 110))
+            enemyTextRect = enemyText.get_rect()
+            enemyTextRect.center = (vals.width // 2, 100)
+            gameScreen.blit(enemyText, enemyTextRect)
+
+        if vals.defeatedEnemies >= vals.enemiesToDefeat:
+            vals.changeScene(0, "win")
+            vals.listOfEnemies = []
+            vals.enemyTimer = 0
+        if vals.map == 1:
+            vals.enemyTimer += 1
+            if len(vals.listOfEnemies) < vals.maxEnemies:
+                s = vals.spawnTimer
+                randSpawn = random.randint(s[0], s[1])
+                if vals.enemyTimer > randSpawn:
+                    vals.enemyTimer = 0
+                    newEnemy = enemyObject(vals, plr)
+                    vals.listOfEnemies += [newEnemy]
+                    print("new enemy created")
+        else:
+            vals.listOfEnemies = []
+
+        if vals.map == 1:
+            for enemy in vals.listOfEnemies:
+                enemy.update(gameScreen, plr, vals)
+
+        # Health
+        if vals.map == 1 and vals.healthPoints <= 0:
+            vals.changeScene(0, "loss")
+
+        healthPointsTemp = vals.healthPoints
+        healthPointsList = []
+        for i in range(vals.maxHealth):
+            positionX = vals.healthPos[0] + (i * vals.healthSpacing)
+            positionY = vals.healthPos[1]
+
+            healthImageName = "resources/noHealth.png"
+            if healthPointsTemp >= 1:
+                healthImageName = "resources/fullHealth.png"
+            elif 0 < healthPointsTemp < 1:
+                healthImageName = "resources/halfHealth.png"
+
+            healthImage = pygame.image.load(healthImageName).convert_alpha()
+            healthImage = pygame.transform.scale(healthImage, (64, 64))
+            healthImageRect = healthImage.get_rect()
+            healthImageRect.center = (positionX, positionY)
+            healthPointsList += [[healthImage, healthImageRect]]
+            healthPointsTemp -= 1
+
         # Render Health Point elements
         if vals.map != 0:
             for healthPoint in healthPointsList:
                 gameScreen.blit(healthPoint[0], healthPoint[1])
 
         # Render Upgrade Menu
-        upgradeMenu.updateMenu(gameScreen, vals)
+        if vals.map == 0:
+            upgradeMenu.updateMenu(gameScreen, vals)
 
         # Render Coin Count
-        coinFont = pygame.font.Font('resources/KenneyFutureNarrow.ttf', 35)
-        coinText = coinFont.render("Coins: " + str(vals.coins), False, (252, 169, 3))
-        coinTextRect = coinText.get_rect()
-        coinTextRect.center = (gameScreen.get_width() // 2, 75)
-        gameScreen.blit(coinText, coinTextRect)
+        if vals.map == 0:
+            coinFont = pygame.font.Font('resources/KenneyFutureNarrow.ttf', 35)
+            coinText = coinFont.render("Coins: " + str(vals.coins), False, (252, 169, 3))
+            coinTextRect = coinText.get_rect()
+            coinTextRect.center = (gameScreen.get_width() // 2, 75)
+            gameScreen.blit(coinText, coinTextRect)
 
         # Render Shop tooltip
-        shopFont = pygame.font.Font('resources/KenneyFutureNarrow.ttf', 20)
-        shopText = shopFont.render("Press E to open/close the shop!", False, (255, 185, 110))
-        shopTextRect = shopText.get_rect()
-        shopTextRect.midtop = (gameScreen.get_width() // 2, 100)
-        gameScreen.blit(shopText, shopTextRect)
+        if vals.map == 0:
+            shopFont = pygame.font.Font('resources/KenneyFutureNarrow.ttf', 20)
+            shopText = shopFont.render("Press E to open/close the shop!", False, (255, 185, 110))
+            shopTextRect = shopText.get_rect()
+            shopTextRect.midtop = (gameScreen.get_width() // 2, 100)
+            gameScreen.blit(shopText, shopTextRect)
+
+        # Render Black Screen
+        if vals.dimStarted == True:
+            if vals.dimming and vals.blackScreen[3] < 255 and vals.dimTimer > vals.dimSpeed:
+                vals.blackScreen[3] += 2.5
+                vals.dimTimer = 0
+            elif vals.dimming == False and vals.blackScreen[3] > 0:
+                vals.blackScreen[3] = 0
+                vals.dimTimer = 0
+                vals.dimStarted = False
+            elif vals.dimming and vals.blackScreen[3] == 255:
+                vals.dimPhase = 1
+
+            blackBoard = pygame.Surface((vals.width, vals.height))
+            blackBoard.set_alpha(vals.blackScreen[3])
+            blackBoard.fill((0, 0, 0))
+            blackBoardRect = blackBoard.get_rect()
+            blackBoardRect.topleft = (0, 0)
+            gameScreen.blit(blackBoard, blackBoardRect)
+            print(vals.dimPhase, vals.dimTimer)
+            if vals.dimPhase == 0:
+                vals.dimming = True
+            elif vals.dimPhase == 1:
+                if vals.dimTimer > 250:
+                    plr.resetPosition(vals)
+                    vals.map = 0
+
+                    bgFile = vals.mapVals[vals.map][1]
+                    background = pygame.image.load(bgFile).convert_alpha()
+                    background = pygame.transform.scale(background, [vals.width, vals.height])
+                    backgroundRect = background.get_rect()
+
+                    gFile = vals.mapVals[vals.map][2]
+                    ground = pygame.image.load(gFile).convert_alpha()
+                    ground = pygame.transform.scale(ground, [vals.width, vals.height])
+                    groundRect = ground.get_rect()
+
+                    cursor = pygame.image.load("resources/cursor.png").convert_alpha()
+                    cursorRect = cursor.get_rect()
+
+                    vals.healthPoints = vals.maxHealth
+                    vals.defeatedEnemies = 0
+                    vals.blackScreen[3] = 0
+                    vals.dimStarted = False
+                else:
+                    if vals.dimType == 0:
+                        dimMessage = "Game Over!"
+                    elif vals.dimType == 1:
+                        dimMessage = "You Win!!"
+
+                    dimFont = pygame.font.Font('resources/KenneyFutureNarrow.ttf', 40)
+                    dimText = dimFont.render(dimMessage, False, (255, 185, 110))
+                    dimTextRect = dimText.get_rect()
+                    dimTextRect.center = (vals.width//2, vals.height//2)
+                    gameScreen.blit(dimText, dimTextRect)
+            elif vals.dimPhase == 2:
+                vals.blackScreen[3] = 0
+                vals.dimStarted = False
+            vals.dimTimer += 1
 
         # Render Cursor
         gameScreen.blit(cursor, cursorRect)
